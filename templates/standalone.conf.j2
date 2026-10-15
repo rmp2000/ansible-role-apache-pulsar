@@ -2,6 +2,8 @@
 clusterName=standalone
 bindAddress={{ apache_pulsar_bind_address }}
 advertisedAddress={{ apache_pulsar_bind_address }}
+# The embedded BookKeeper shares this configuration; permit local-only tests.
+allowLoopback=true
 brokerServicePort=
 webServicePort=
 brokerServicePortTls={{ apache_pulsar_broker_port }}

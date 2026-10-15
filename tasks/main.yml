@@ -202,6 +202,7 @@
 
 - name: Wait for authenticated HTTPS administration
   ansible.builtin.uri:
+    timeout: 10
     url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/clusters"
     headers:
       Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"

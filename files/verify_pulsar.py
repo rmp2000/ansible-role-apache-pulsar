@@ -118,5 +118,6 @@ if __name__ == '__main__':
         main()
     except Exception as error:
         # Do not emit client exception details which could contain credentials.
-        print('APACHE_PULSAR_CHECK_FAILED: '+type(error).__name__, file=sys.stderr)
+        detail = str(error) if type(error) is RuntimeError else type(error).__name__
+        print('APACHE_PULSAR_CHECK_FAILED: '+detail, file=sys.stderr)
         raise SystemExit(1)
