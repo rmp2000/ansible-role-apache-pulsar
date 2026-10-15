@@ -1,0 +1,63 @@
+---
+- name: Read configured tenants
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/tenants"
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+  register: apache_pulsar_tenants
+  no_log: true
+
+- name: Create the dedicated tenant
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/tenants/{{ apache_pulsar_tenant }}"
+    method: PUT
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+    body_format: json
+    body: {adminRoles: [admin], allowedClusters: [standalone]}
+    status_code: [200, 204]
+  when: apache_pulsar_tenant not in apache_pulsar_tenants.json
+  changed_when: true
+  no_log: true
+
+- name: Read tenant namespaces
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/namespaces/{{ apache_pulsar_tenant }}"
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+  register: apache_pulsar_namespaces
+  no_log: true
+
+- name: Create the dedicated namespace
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/namespaces/{{ apache_pulsar_tenant }}/{{ apache_pulsar_namespace }}"
+    method: PUT
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+    body_format: json
+    body: {bundles: {numBundles: 1}}
+    status_code: [200, 204]
+  when: (apache_pulsar_tenant ~ '/' ~ apache_pulsar_namespace) not in apache_pulsar_namespaces.json
+  changed_when: true
+  no_log: true
+
+- name: Read namespace permissions
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/namespaces/{{ apache_pulsar_tenant }}/{{ apache_pulsar_namespace }}/permissions"
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+  register: apache_pulsar_permissions
+  no_log: true
+
+- name: Grant the client role permission to produce and consume
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/namespaces/{{ apache_pulsar_tenant }}/{{ apache_pulsar_namespace }}/permissions/client"
+    method: POST
+    headers: {Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"}
+    ca_path: /etc/apache-pulsar/tls/server.crt
+    body_format: json
+    body: [produce, consume]
+    status_code: [200, 204]
+  when: (apache_pulsar_permissions.json.get('client', []) | sort) != ['consume', 'produce']
+  changed_when: true
+  no_log: true

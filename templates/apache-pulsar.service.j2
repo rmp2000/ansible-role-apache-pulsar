@@ -1,0 +1,25 @@
+[Unit]
+Description=Apache Pulsar standalone broker
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor={{ apache_pulsar_data_dir }}
+
+[Service]
+Type=simple
+User=pulsar
+Group=pulsar
+WorkingDirectory={{ apache_pulsar_home }}
+Environment="JAVA_HOME={{ apache_pulsar_java_home }}"
+Environment="PULSAR_MEM=-Xms512m -Xmx2g -XX:MaxDirectMemorySize=2g"
+Environment="PULSAR_LOG_DIR=/var/log/apache-pulsar"
+ExecStart={{ apache_pulsar_home }}/bin/pulsar standalone --config /etc/apache-pulsar/standalone.conf --no-functions-worker --no-stream-storage --metadata-dir {{ apache_pulsar_data_dir }}/metadata --bookkeeper-dir {{ apache_pulsar_data_dir }}/bookkeeper
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+LimitNOFILE=65536
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

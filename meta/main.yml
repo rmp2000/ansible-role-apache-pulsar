@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: apache_pulsar
+  namespace: rmp2000
+  author: rmp2000
+  description: Standalone Apache Pulsar with TLS, token authorization and persistent storage.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy]
+dependencies: []

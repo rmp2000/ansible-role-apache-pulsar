@@ -1,0 +1,8 @@
+---
+- hosts: localhost
+  connection: local
+  become: true
+  vars:
+    apache_pulsar_token_secret: ci-only-signing-key-not-for-any-real-deployment-123456
+  roles:
+    - apache_pulsar

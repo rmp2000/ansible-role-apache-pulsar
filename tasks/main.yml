@@ -1,0 +1,215 @@
+---
+- name: Validate supported environment and required settings
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version == '22.04'
+      - apache_pulsar_version == '5.0.0'
+      - apache_pulsar_tenant is match('^[a-zA-Z][a-zA-Z0-9_-]*$')
+      - apache_pulsar_namespace is match('^[a-zA-Z][a-zA-Z0-9_-]*$')
+      - apache_pulsar_broker_port | int > 0
+      - apache_pulsar_admin_port | int > 0
+      - apache_pulsar_broker_port | int < 65536
+      - apache_pulsar_admin_port | int < 65536
+      - apache_pulsar_broker_port | int != apache_pulsar_admin_port | int
+
+- name: Validate signing secret
+  ansible.builtin.assert:
+    that:
+      - apache_pulsar_token_secret | length >= 32
+  no_log: true
+
+- name: Verify data filesystem before installing software
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import json,os,sys; p=sys.argv[1]; s=os.statvfs(p); print(json.dumps({'mount':os.path.ismount(p),'size':s.f_blocks*s.f_frsize}))"
+      - "{{ apache_pulsar_data_dir }}"
+  register: apache_pulsar_filesystem
+  changed_when: false
+  when: apache_pulsar_require_data_mount | bool
+
+- name: Reject missing or undersized data filesystem
+  ansible.builtin.assert:
+    that:
+      - (apache_pulsar_filesystem.stdout | from_json).mount
+      - (apache_pulsar_filesystem.stdout | from_json).size >= 1073741824
+  when: apache_pulsar_require_data_mount | bool
+
+- name: Install supported Java runtime and Python tooling
+  ansible.builtin.apt:
+    name: [openjdk-21-jre-headless, openssl, python3-venv, ca-certificates]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create service account
+  ansible.builtin.user:
+    name: pulsar
+    system: true
+    home: "{{ apache_pulsar_data_dir }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create data configuration and log directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: pulsar
+    group: pulsar
+    mode: '0750'
+  loop:
+    - "{{ apache_pulsar_data_dir }}"
+    - "{{ apache_pulsar_data_dir }}/metadata"
+    - "{{ apache_pulsar_data_dir }}/bookkeeper"
+    - /var/log/apache-pulsar
+    - /etc/apache-pulsar
+    - /etc/apache-pulsar/tls
+
+- name: Download verified official Apache Pulsar distribution
+  ansible.builtin.get_url:
+    url: "{{ apache_pulsar_archive_url }}"
+    checksum: "{{ apache_pulsar_archive_checksum }}"
+    dest: "/var/cache/apache-pulsar-{{ apache_pulsar_version }}.tar.gz"
+    mode: '0644'
+    timeout: 120
+
+- name: Extract the fixed release
+  ansible.builtin.unarchive:
+    src: "/var/cache/apache-pulsar-{{ apache_pulsar_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: "{{ apache_pulsar_home }}/bin/pulsar"
+  notify: Restart Apache Pulsar
+
+- name: Generate deterministic role credentials without logging the signing secret
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import base64,hmac,hashlib,json,sys; key=sys.stdin.buffer.read(); enc=lambda x:base64.urlsafe_b64encode(x).rstrip(b'=').decode(); header=enc(b'{\"alg\":\"HS256\",\"typ\":\"JWT\"}'); token=lambda role:(lambda body:body+'.'+enc(hmac.new(key,body.encode(),hashlib.sha256).digest()))(header+'.'+enc(json.dumps({'sub':role},separators=(',',':')).encode())); print(json.dumps({r:token(r) for r in ['admin','client','denied']}))"
+    stdin: "{{ apache_pulsar_token_secret }}"
+    stdin_add_newline: false
+  register: apache_pulsar_credentials
+  no_log: true
+  changed_when: false
+
+- name: Store the signing key and scoped credentials
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: pulsar
+    mode: '0640'
+  loop:
+    - dest: /etc/apache-pulsar/token.key
+      content: "{{ apache_pulsar_token_secret }}"
+    - dest: /etc/apache-pulsar/admin.token
+      content: "{{ (apache_pulsar_credentials.stdout | from_json).admin }}"
+    - dest: /etc/apache-pulsar/client.token
+      content: "{{ (apache_pulsar_credentials.stdout | from_json).client }}"
+    - dest: /etc/apache-pulsar/denied.token
+      content: "{{ (apache_pulsar_credentials.stdout | from_json).denied }}"
+  no_log: true
+  notify: Restart Apache Pulsar
+
+- name: Create a persistent TLS certificate with the VM addresses
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:3072
+      - -nodes
+      - -days
+      - '365'
+      - -keyout
+      - /etc/apache-pulsar/tls/server.key
+      - -out
+      - /etc/apache-pulsar/tls/server.crt
+      - -subj
+      - /CN=apache-pulsar
+      - -addext
+      - "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{{ ansible_all_ipv4_addresses | join(',IP:') }}"
+    creates: /etc/apache-pulsar/tls/server.crt
+  notify: Restart Apache Pulsar
+
+- name: Protect TLS files
+  ansible.builtin.file:
+    path: "/etc/apache-pulsar/tls/{{ item }}"
+    owner: root
+    group: pulsar
+    mode: '0640'
+  loop: [server.crt, server.key]
+
+- name: Install broker and service configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: pulsar
+    mode: '0640'
+  loop:
+    - {src: standalone.conf.j2, dest: /etc/apache-pulsar/standalone.conf}
+    - {src: apache-pulsar.service.j2, dest: /etc/systemd/system/apache-pulsar.service}
+  notify: Restart Apache Pulsar
+
+- name: Install the pinned verification client in its own virtual environment
+  ansible.builtin.pip:
+    name: "pulsar-client=={{ apache_pulsar_client_version }}"
+    virtualenv: /opt/apache-pulsar-client
+    virtualenv_command: python3 -m venv
+
+- name: Install functional verification tool
+  ansible.builtin.copy:
+    src: verify_pulsar.py
+    dest: /usr/local/bin/apache-pulsar-verify
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Apply service configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Apache Pulsar at boot
+  ansible.builtin.systemd:
+    name: apache-pulsar
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for authenticated HTTPS administration
+  ansible.builtin.uri:
+    url: "https://{{ apache_pulsar_bind_address }}:{{ apache_pulsar_admin_port }}/admin/v2/clusters"
+    headers:
+      Authorization: "Bearer {{ (apache_pulsar_credentials.stdout | from_json).admin }}"
+    ca_path: /etc/apache-pulsar/tls/server.crt
+    return_content: true
+    status_code: 200
+  register: apache_pulsar_ready
+  retries: 36
+  delay: 5
+  until: apache_pulsar_ready.status == 200
+  no_log: true
+
+- name: Configure dedicated tenant namespace and client permissions
+  ansible.builtin.include_tasks: namespace.yml
+
+- name: Verify authenticated messaging and rejection of unauthorized access
+  ansible.builtin.command:
+    argv: [/opt/apache-pulsar-client/bin/python, /usr/local/bin/apache-pulsar-verify, smoke]
+    stdin: "{{ {'host':apache_pulsar_bind_address,'broker_port':apache_pulsar_broker_port,'admin_port':apache_pulsar_admin_port,'namespace':apache_pulsar_tenant ~ '/' ~ apache_pulsar_namespace} | to_json }}"
+  register: apache_pulsar_smoke
+  changed_when: false
+  when: apache_pulsar_verify | bool
+
+- name: Report successful messaging verification
+  ansible.builtin.debug:
+    msg: APACHE_PULSAR_SMOKE_OK
+  when: apache_pulsar_verify | bool
+
+- name: Optionally verify persistence across a service restart
+  ansible.builtin.include_tasks: persistence.yml
+  when: apache_pulsar_test_restart | bool

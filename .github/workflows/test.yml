@@ -1,0 +1,30 @@
+name: Functional role verification
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: roles/apache_pulsar
+      - name: Install Ansible
+        run: pip install 'ansible-core==2.16.14'
+      - name: Validate and install with persistence verification
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: |
+          ansible-playbook roles/apache_pulsar/tests/test.yml --syntax-check
+          ansible-playbook roles/apache_pulsar/tests/test.yml -e apache_pulsar_test_restart=true
+      - name: Verify application idempotence
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: |
+          set -o pipefail
+          ansible-playbook roles/apache_pulsar/tests/test.yml | tee /tmp/apache-pulsar-idempotence.log
+          grep -E 'changed=0[[:space:]]+unreachable=0[[:space:]]+failed=0' /tmp/apache-pulsar-idempotence.log
+      - name: Service diagnostics on failure
+        if: failure()
+        run: |
+          sudo journalctl -u apache-pulsar --no-pager -n 100
+          sudo tail -n 100 /var/log/apache-pulsar/*.log || true
