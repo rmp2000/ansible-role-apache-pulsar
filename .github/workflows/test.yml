@@ -11,6 +11,7 @@ jobs:
       - name: Install Ansible
         run: pip install 'ansible-core==2.16.14'
       - name: Validate and install with persistence verification
+        timeout-minutes: 15
         env:
           ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
         run: |
@@ -24,7 +25,7 @@ jobs:
           ansible-playbook roles/apache_pulsar/tests/test.yml | tee /tmp/apache-pulsar-idempotence.log
           grep -E 'changed=0[[:space:]]+unreachable=0[[:space:]]+failed=0' /tmp/apache-pulsar-idempotence.log
       - name: Service diagnostics on failure
-        if: failure()
+        if: failure() || cancelled()
         run: |
           sudo journalctl -u apache-pulsar --no-pager -n 100
           sudo tail -n 100 /var/log/apache-pulsar/*.log || true

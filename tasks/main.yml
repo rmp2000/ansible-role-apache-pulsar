@@ -67,13 +67,33 @@
     - /etc/apache-pulsar
     - /etc/apache-pulsar/tls
 
-- name: Download verified official Apache Pulsar distribution
-  ansible.builtin.get_url:
-    url: "{{ apache_pulsar_archive_url }}"
-    checksum: "{{ apache_pulsar_archive_checksum }}"
-    dest: "/var/cache/apache-pulsar-{{ apache_pulsar_version }}.tar.gz"
-    mode: '0644'
-    timeout: 120
+- name: Download the checksum-verified official distribution
+  block:
+    - name: Download from the active Apache release server
+      ansible.builtin.get_url:
+        url: "{{ apache_pulsar_archive_url }}"
+        checksum: "{{ apache_pulsar_archive_checksum }}"
+        dest: "/var/cache/apache-pulsar-{{ apache_pulsar_version }}.tar.gz"
+        mode: '0644'
+        timeout: 30
+      async: 600
+      poll: 10
+      register: apache_pulsar_download
+  rescue:
+    - name: Use the archive only if the release has left the active server
+      ansible.builtin.assert:
+        that:
+          - apache_pulsar_download.status_code | default(0) | int == 404
+
+    - name: Download the same verified release from the permanent archive
+      ansible.builtin.get_url:
+        url: "{{ apache_pulsar_archive_fallback_url }}"
+        checksum: "{{ apache_pulsar_archive_checksum }}"
+        dest: "/var/cache/apache-pulsar-{{ apache_pulsar_version }}.tar.gz"
+        mode: '0644'
+        timeout: 30
+      async: 600
+      poll: 10
 
 - name: Extract the fixed release
   ansible.builtin.unarchive:
