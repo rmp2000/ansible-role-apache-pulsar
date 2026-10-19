@@ -33,3 +33,9 @@ at `/srv/apache-pulsar/.pulsar-verification.json` for diagnosis/retry.
 The Python client is pinned to 3.13.0 in its own virtual environment. Defaults,
 templates and handlers are independent of Infrastructure Manager; the matching
 TOSCA recipe supplies the cloud topology and inputs.
+
+The generated TLS certificate covers localhost, the node hostname/FQDN and its
+IPv4 addresses. This includes DNS names returned during broker self-connections
+on private-only VMs. Existing certificates missing required identities are renewed
+and the service restarted; subsequent runs preserve the certificate. Additional
+DNS identities can be supplied through `apache_pulsar_tls_dns_names`.

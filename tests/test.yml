@@ -3,6 +3,13 @@
   connection: local
   become: true
   vars:
+    apache_pulsar_bind_address: "{{ ansible_default_ipv4.address }}"
     apache_pulsar_token_secret: ci-only-signing-key-not-for-any-real-deployment-123456
   roles:
     - apache_pulsar
+  post_tasks:
+    - name: Verify messaging through the node DNS identity with strict TLS
+      ansible.builtin.command:
+        argv: [/opt/apache-pulsar-client/bin/python, /usr/local/bin/apache-pulsar-verify, smoke]
+        stdin: "{{ {'host':ansible_fqdn,'broker_port':apache_pulsar_broker_port,'admin_port':apache_pulsar_admin_port,'namespace':apache_pulsar_tenant ~ '/' ~ apache_pulsar_namespace} | to_json }}"
+      changed_when: false

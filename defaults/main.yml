@@ -7,6 +7,7 @@ apache_pulsar_home: "/opt/apache-pulsar-{{ apache_pulsar_version }}"
 apache_pulsar_data_dir: /srv/apache-pulsar
 apache_pulsar_require_data_mount: false
 apache_pulsar_bind_address: 127.0.0.1
+apache_pulsar_tls_dns_names: "{{ ['localhost', ansible_hostname, ansible_fqdn] | unique }}"
 apache_pulsar_broker_port: 6651
 apache_pulsar_admin_port: 8443
 apache_pulsar_token_secret: ""

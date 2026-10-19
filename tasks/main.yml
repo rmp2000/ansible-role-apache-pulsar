@@ -134,7 +134,27 @@
   no_log: true
   notify: Restart Apache Pulsar
 
-- name: Create a persistent TLS certificate with the VM addresses
+- name: Check whether the persistent TLS certificate covers the node identities
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, re, subprocess, sys
+        from pathlib import Path
+        dns, ips = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+        result = subprocess.run(['openssl', 'x509', '-in', '/etc/apache-pulsar/tls/server.crt',
+                                 '-noout', '-ext', 'subjectAltName'], capture_output=True, text=True)
+        actual = set(re.findall(r'(DNS|IP Address):([^,\s]+)', result.stdout))
+        expected = {('DNS', name) for name in dns} | {('IP Address', ip) for ip in ips}
+        print(json.dumps({'renew': result.returncode != 0 or not expected.issubset(actual)
+                         or not Path('/etc/apache-pulsar/tls/server.key').is_file()}))
+      - "{{ apache_pulsar_tls_dns_names | unique | to_json }}"
+      - "{{ (['127.0.0.1'] + ansible_all_ipv4_addresses) | unique | to_json }}"
+  register: apache_pulsar_certificate_check
+  changed_when: false
+
+- name: Create or renew the persistent TLS certificate with the VM names and addresses
   ansible.builtin.command:
     argv:
       - openssl
@@ -152,8 +172,8 @@
       - -subj
       - /CN=apache-pulsar
       - -addext
-      - "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{{ ansible_all_ipv4_addresses | join(',IP:') }}"
-    creates: /etc/apache-pulsar/tls/server.crt
+      - "subjectAltName=DNS:{{ apache_pulsar_tls_dns_names | unique | join(',DNS:') }},IP:{{ (['127.0.0.1'] + ansible_all_ipv4_addresses) | unique | join(',IP:') }}"
+  when: (apache_pulsar_certificate_check.stdout | from_json).renew
   notify: Restart Apache Pulsar
 
 - name: Protect TLS files
