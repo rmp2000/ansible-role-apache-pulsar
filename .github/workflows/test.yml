@@ -24,6 +24,14 @@ jobs:
           set -o pipefail
           ansible-playbook roles/apache_pulsar/tests/test.yml | tee /tmp/apache-pulsar-idempotence.log
           grep -E 'changed=0[[:space:]]+unreachable=0[[:space:]]+failed=0' /tmp/apache-pulsar-idempotence.log
+      - name: Verify the compact memory profile with persistence
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: |
+          compact='-Xms256m -Xmx1g -XX:MaxDirectMemorySize=1g'
+          ansible-playbook roles/apache_pulsar/tests/test.yml -e "apache_pulsar_mem='$compact'" -e apache_pulsar_test_restart=true
+          pgrep -u pulsar -af java | grep -- '-Xmx1g'
+          pgrep -u pulsar -af java | grep -- '-XX:MaxDirectMemorySize=1g'
       - name: Service diagnostics on failure
         if: failure() || cancelled()
         run: |

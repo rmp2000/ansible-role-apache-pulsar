@@ -30,6 +30,12 @@ an unconsumed durable message, restart the service, consume the exact original
 bytes and remove the temporary topic. A failed persistence test leaves a marker
 at `/srv/apache-pulsar/.pulsar-verification.json` for diagnosis/retry.
 
+`apache_pulsar_mem` sets the standalone JVM memory (`PULSAR_MEM`). The default,
+`-Xms512m -Xmx2g -XX:MaxDirectMemorySize=2g`, suits the 8 GB standalone recipe.
+Smaller VMs that also host clients can use `-Xms256m -Xmx1g
+-XX:MaxDirectMemorySize=1g`, which suffices for low-rate test workloads. Changing
+it rewrites the unit file and restarts the service.
+
 The Python client is pinned to 3.13.0 in its own virtual environment. Defaults,
 templates and handlers are independent of Infrastructure Manager; the matching
 TOSCA recipe supplies the cloud topology and inputs.

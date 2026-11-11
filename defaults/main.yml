@@ -14,6 +14,7 @@ apache_pulsar_token_secret: ""
 apache_pulsar_tenant: platform
 apache_pulsar_namespace: events
 apache_pulsar_client_version: "3.13.0"
+apache_pulsar_mem: "-Xms512m -Xmx2g -XX:MaxDirectMemorySize=2g"
 apache_pulsar_java_home: "/usr/lib/jvm/java-21-openjdk-{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
 apache_pulsar_verify: true
 apache_pulsar_test_restart: false
